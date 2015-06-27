@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -435,8 +436,15 @@ func changeMapToURLValues(data map[string]interface{}) url.Values {
 	var newUrlValues = url.Values{}
 	for k, v := range data {
 		switch val := v.(type) {
+		case map[string]interface{}:
+			sv, _ := json.Marshal(val)
+			newUrlValues.Add(k, string(sv))
 		case string:
 			newUrlValues.Add(k, val)
+		case float64:
+			newUrlValues.Add(k, fmt.Sprintf("%f", val))
+		case int, bool:
+			newUrlValues.Add(k, fmt.Sprintf("%+v", val))
 		case []string:
 			for _, element := range val {
 				newUrlValues.Add(k, element)
