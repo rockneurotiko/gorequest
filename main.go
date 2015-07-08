@@ -277,6 +277,12 @@ func (s *SuperAgent) Timeout(timeout time.Duration) *SuperAgent {
 	return s
 }
 
+// DisableKeepAlives will set the transport keep alive to that value.
+func (s *SuperAgent) DisableKeepAlives(disable bool) *SuperAgent {
+	s.Transport.DisableKeepAlives = disable
+	return s
+}
+
 // Set TLSClientConfig for underling Transport.
 // One example is you can use it to disable security check (https):
 //
