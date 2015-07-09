@@ -39,6 +39,7 @@ type SuperAgent struct {
 	Header     map[string]string
 	TargetType string
 	ForceType  string
+	Close      bool
 	Data       map[string]interface{}
 	FormData   url.Values
 	QueryData  url.Values
@@ -56,6 +57,7 @@ func New() *SuperAgent {
 	jar, _ := cookiejar.New(&cookiejarOptions)
 	s := &SuperAgent{
 		TargetType: "json",
+		Close:      false,
 		Data:       make(map[string]interface{}),
 		Header:     make(map[string]string),
 		FormData:   url.Values{},
@@ -280,6 +282,11 @@ func (s *SuperAgent) Timeout(timeout time.Duration) *SuperAgent {
 // DisableKeepAlives will set the transport keep alive to that value.
 func (s *SuperAgent) DisableKeepAlives(disable bool) *SuperAgent {
 	s.Transport.DisableKeepAlives = disable
+	return s
+}
+
+func (s *SuperAgent) CloseRequest(close bool) *SuperAgent {
+	s.Close = close
 	return s
 }
 
@@ -513,6 +520,8 @@ func (s *SuperAgent) End(callback ...func(response Response, body string, errs [
 	case GET, HEAD, DELETE:
 		req, err = http.NewRequest(s.Method, s.Url, nil)
 	}
+
+	req.Close = s.Close
 
 	for k, v := range s.Header {
 		req.Header.Set(k, v)
