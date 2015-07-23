@@ -47,6 +47,7 @@ type SuperAgent struct {
 	Transport  *http.Transport
 	Cookies    []*http.Cookie
 	Errors     []error
+	BasicAuth  struct{ Username, Password string }
 }
 
 // Used to create a new SuperAgent object.
@@ -66,6 +67,7 @@ func New() *SuperAgent {
 		Transport:  &http.Transport{},
 		Cookies:    make([]*http.Cookie, 0),
 		Errors:     nil,
+		BasicAuth:  struct{ Username, Password string }{},
 	}
 	return s
 }
@@ -141,6 +143,18 @@ func (s *SuperAgent) Patch(targetUrl string) *SuperAgent {
 //      End()
 func (s *SuperAgent) Set(param string, value string) *SuperAgent {
 	s.Header[param] = value
+	return s
+}
+
+// SetBasicAuth sets the basic authentication header
+// Example. To set the header for username "myuser" and password "mypass"
+//
+//    gorequest.New()
+//      Post("/gamelist").
+//      SetBasicAuth("myuser", "mypass").
+//      End()
+func (s *SuperAgent) SetBasicAuth(username string, password string) *SuperAgent {
+	s.BasicAuth = struct{ Username, Password string }{username, password}
 	return s
 }
 
@@ -398,7 +412,9 @@ func (s *SuperAgent) sendStruct(content interface{}) *SuperAgent {
 		s.Errors = append(s.Errors, err)
 	} else {
 		var val map[string]interface{}
-		if err := json.Unmarshal(marshalContent, &val); err != nil {
+		d := json.NewDecoder(bytes.NewBuffer(marshalContent))
+		d.UseNumber()
+		if err := d.Decode(&val); err != nil {
 			s.Errors = append(s.Errors, err)
 		} else {
 			for k, v := range val {
@@ -415,7 +431,9 @@ func (s *SuperAgent) sendStruct(content interface{}) *SuperAgent {
 func (s *SuperAgent) SendString(content string) *SuperAgent {
 	var val map[string]interface{}
 	// check if it is json format
-	if err := json.Unmarshal([]byte(content), &val); err == nil {
+	d := json.NewDecoder(strings.NewReader(content))
+	d.UseNumber()
+	if err := d.Decode(&val); err == nil {
 		for k, v := range val {
 			s.Data[k] = v
 		}
@@ -462,6 +480,12 @@ func changeMapToURLValues(data map[string]interface{}) url.Values {
 			for _, element := range val {
 				newUrlValues.Add(k, element)
 			}
+		// if a number, change to string
+		// json.Number used to protect against a wrong (for GoRequest) default conversion
+		// which always converts number to float64.
+		// This type is caused by using Decoder.UseNumber()
+		case json.Number:
+			newUrlValues.Add(k, string(val))
 		}
 	}
 	return newUrlValues
@@ -469,12 +493,12 @@ func changeMapToURLValues(data map[string]interface{}) url.Values {
 
 // End is the most important function that you need to call when ending the chain. The request won't proceed without calling it.
 // End function returns Response which matchs the structure of Response type in Golang's http package (but without Body data). The body data itself returns as a string in a 2nd return value.
-// Lastly but worht noticing, error array (NOTE: not just single error value) is returned as a 3rd value and nil otherwise.
+// Lastly but worth noticing, error array (NOTE: not just single error value) is returned as a 3rd value and nil otherwise.
 //
 // For example:
 //
 //    resp, body, errs := gorequest.New().Get("http://www.google.com").End()
-//    if( errs != nil){
+//    if (errs != nil) {
 //      fmt.Println(errs)
 //    }
 //    fmt.Println(resp, body)
@@ -490,6 +514,21 @@ func changeMapToURLValues(data map[string]interface{}) url.Values {
 //    gorequest.New().Get("http://www..google.com").End(printBody)
 //
 func (s *SuperAgent) End(callback ...func(response Response, body string, errs []error)) (Response, string, []error) {
+	var bytesCallback []func(response Response, body []byte, errs []error)
+	if len(callback) > 0 {
+		bytesCallback = []func(response Response, body []byte, errs []error){
+			func(response Response, body []byte, errs []error) {
+				callback[0](response, string(body), errs)
+			},
+		}
+	}
+	resp, body, errs := s.EndBytes(bytesCallback...)
+	bodyString := string(body)
+	return resp, bodyString, errs
+}
+
+// EndBytes should be used when you want the body as bytes. The callbacks work the same way as with `End`, except that a byte array is used instead of a string.
+func (s *SuperAgent) EndBytes(callback ...func(response Response, body []byte, errs []error)) (Response, []byte, []error) {
 	var (
 		req  *http.Request
 		err  error
@@ -497,7 +536,7 @@ func (s *SuperAgent) End(callback ...func(response Response, body string, errs [
 	)
 	// check whether there is an error. if yes, return all errors
 	if len(s.Errors) != 0 {
-		return nil, "", s.Errors
+		return nil, nil, s.Errors
 	}
 	// check if there is forced type
 	switch s.ForceType {
@@ -535,6 +574,11 @@ func (s *SuperAgent) End(callback ...func(response Response, body string, errs [
 	}
 	req.URL.RawQuery = q.Encode()
 
+	// Add basic auth
+	if s.BasicAuth != struct{ Username, Password string }{} {
+		req.SetBasicAuth(s.BasicAuth.Username, s.BasicAuth.Password)
+	}
+
 	// Add cookies
 	for _, cookie := range s.Cookies {
 		req.AddCookie(cookie)
@@ -546,16 +590,15 @@ func (s *SuperAgent) End(callback ...func(response Response, body string, errs [
 	resp, err = s.Client.Do(req)
 	if err != nil {
 		s.Errors = append(s.Errors, err)
-		return nil, "", s.Errors
+		return nil, nil, s.Errors
 	}
 	defer resp.Body.Close()
 
 	body, _ := ioutil.ReadAll(resp.Body)
-	bodyString := string(body)
 	// deep copy response to give it to both return and callback func
 	respCallback := *resp
 	if len(callback) != 0 {
-		callback[0](&respCallback, bodyString, s.Errors)
+		callback[0](&respCallback, body, s.Errors)
 	}
-	return resp, bodyString, nil
+	return resp, body, nil
 }
