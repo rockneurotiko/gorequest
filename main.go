@@ -64,7 +64,7 @@ func New() *SuperAgent {
 		FormData:   url.Values{},
 		QueryData:  url.Values{},
 		Client:     &http.Client{Jar: jar},
-		Transport:  &http.Transport{},
+		Transport:  &http.Transport{Proxy: http.ProxyFromEnvironment},
 		Cookies:    make([]*http.Cookie, 0),
 		Errors:     nil,
 		BasicAuth:  struct{ Username, Password string }{},
