@@ -8,10 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httputil"
 	"net/url"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -48,6 +51,8 @@ type SuperAgent struct {
 	Cookies    []*http.Cookie
 	Errors     []error
 	BasicAuth  struct{ Username, Password string }
+	Debug      bool
+	logger     *log.Logger
 }
 
 // Used to create a new SuperAgent object.
@@ -68,7 +73,20 @@ func New() *SuperAgent {
 		Cookies:    make([]*http.Cookie, 0),
 		Errors:     nil,
 		BasicAuth:  struct{ Username, Password string }{},
+		Debug:      false,
+		logger:     log.New(os.Stderr, "[gorequest]", log.LstdFlags),
 	}
+	return s
+}
+
+// Enable the debug mode which logs request/response detail
+func (s *SuperAgent) SetDebug(enable bool) *SuperAgent {
+	s.Debug = enable
+	return s
+}
+
+func (s *SuperAgent) SetLogger(logger *log.Logger) *SuperAgent {
+	s.logger = logger
 	return s
 }
 
@@ -161,6 +179,12 @@ func (s *SuperAgent) SetBasicAuth(username string, password string) *SuperAgent 
 // AddCookie adds a cookie to the request. The behavior is the same as AddCookie on Request from net/http
 func (s *SuperAgent) AddCookie(c *http.Cookie) *SuperAgent {
 	s.Cookies = append(s.Cookies, c)
+	return s
+}
+
+// AddCookies is a convenient method to add multiple cookies
+func (s *SuperAgent) AddCookies(cookies []*http.Cookie) *SuperAgent {
+	s.Cookies = append(s.Cookies, cookies...)
 	return s
 }
 
@@ -280,6 +304,14 @@ func (s *SuperAgent) queryString(content string) *SuperAgent {
 	return s
 }
 
+// As Go conventions accepts ; as a synonym for &. (https://github.com/golang/go/issues/2210)
+// Thus, Query won't accept ; in a querystring if we provide something like fields=f1;f2;f3
+// This Param is then created as an alternative method to solve this.
+func (s *SuperAgent) Param(key string, value string) *SuperAgent {
+	s.QueryData.Add(key, value)
+	return s
+}
+
 func (s *SuperAgent) Timeout(timeout time.Duration) *SuperAgent {
 	s.Transport.Dial = func(network, addr string) (net.Conn, error) {
 		conn, err := net.DialTimeout(network, addr, timeout)
@@ -307,9 +339,9 @@ func (s *SuperAgent) CloseRequest(close bool) *SuperAgent {
 // Set TLSClientConfig for underling Transport.
 // One example is you can use it to disable security check (https):
 //
-// 			gorequest.New().TLSClientConfig(&tls.Config{ InsecureSkipVerify: true}).
-// 				Get("https://disable-security-check.com").
-// 				End()
+//      gorequest.New().TLSClientConfig(&tls.Config{ InsecureSkipVerify: true}).
+//        Get("https://disable-security-check.com").
+//        End()
 //
 func (s *SuperAgent) TLSClientConfig(config *tls.Config) *SuperAgent {
 	s.Transport.TLSClientConfig = config
@@ -586,8 +618,29 @@ func (s *SuperAgent) EndBytes(callback ...func(response Response, body []byte, e
 
 	// Set Transport
 	s.Client.Transport = s.Transport
+
+	// Log details of this request
+	if s.Debug {
+		dump, err := httputil.DumpRequest(req, true)
+		s.logger.SetPrefix("[http] ")
+		if err != nil {
+			s.logger.Printf("Error: %s", err.Error())
+		}
+		s.logger.Printf("HTTP Request: %s", string(dump))
+	}
+
 	// Send request
 	resp, err = s.Client.Do(req)
+
+	// Log details of this response
+	if s.Debug {
+		dump, err := httputil.DumpResponse(resp, true)
+		if nil != err {
+			s.logger.Println("Error: ", err.Error())
+		}
+		s.logger.Printf("HTTP Response: %s", string(dump))
+	}
+
 	if err != nil {
 		s.Errors = append(s.Errors, err)
 		return nil, nil, s.Errors
@@ -595,6 +648,8 @@ func (s *SuperAgent) EndBytes(callback ...func(response Response, body []byte, e
 	defer resp.Body.Close()
 
 	body, _ := ioutil.ReadAll(resp.Body)
+	// Reset resp.Body so it can be use again
+	resp.Body = ioutil.NopCloser(bytes.NewBuffer(body))
 	// deep copy response to give it to both return and callback func
 	respCallback := *resp
 	if len(callback) != 0 {
