@@ -437,7 +437,7 @@ func TestTimeoutFunc(t *testing.T) {
 		t.Errorf("Expected dial timeout error but get nothing")
 	}
 	if elapsedTime < 1000*time.Millisecond || elapsedTime > 1500*time.Millisecond {
-		t.Errorf("Expected timeout in between 1000 -> 1500 ms | but got ", elapsedTime)
+		t.Errorf("Expected timeout in between 1000 -> 1500 ms | but got %d", elapsedTime)
 	}
 	// 2st case, read/write timeout (Can dial to url but want to timeout because too long operation on the server)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -452,7 +452,7 @@ func TestTimeoutFunc(t *testing.T) {
 		t.Errorf("Expected dial+read/write timeout | but get nothing")
 	}
 	if elapsedTime < 1000*time.Millisecond || elapsedTime > 1500*time.Millisecond {
-		t.Errorf("Expected timeout in between 1000 -> 1500 ms | but got ", elapsedTime)
+		t.Errorf("Expected timeout in between 1000 -> 1500 ms | but got %d", elapsedTime)
 	}
 	// 3rd case, testing reuse of same request
 	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -466,7 +466,7 @@ func TestTimeoutFunc(t *testing.T) {
 		t.Errorf("Expected dial+read/write timeout | but get nothing")
 	}
 	if elapsedTime < 1000*time.Millisecond || elapsedTime > 1500*time.Millisecond {
-		t.Errorf("Expected timeout in between 1000 -> 1500 ms | but got ", elapsedTime)
+		t.Errorf("Expected timeout in between 1000 -> 1500 ms | but got %d", elapsedTime)
 	}
 
 }
@@ -573,5 +573,76 @@ func TestBasicAuth(t *testing.T) {
 	defer ts.Close()
 	New().Post(ts.URL).
 		SetBasicAuth("myusername", "mypassword").
+		End()
+}
+
+func TestXml(t *testing.T) {
+	xml := `<note><to>Tove</to><from>Jani</from><heading>Reminder</heading><body>Don't forget me this weekend!</body></note>`
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// check method is PATCH before going to check other features
+		if r.Method != POST {
+			t.Errorf("Expected method %q; got %q", POST, r.Method)
+		}
+		if r.Header == nil {
+			t.Errorf("Expected non-nil request Header")
+		}
+
+		if r.Header.Get("Content-Type") != "application/xml" {
+			t.Error("Expected Header Content-Type -> application/xml", "| but got", r.Header.Get("Content-Type"))
+		}
+
+		defer r.Body.Close()
+		body, _ := ioutil.ReadAll(r.Body)
+		if string(body) != xml {
+			t.Error(`Expected XML `, xml, "| but got", string(body))
+		}
+	}))
+
+	defer ts.Close()
+
+	New().Post(ts.URL).
+		Type("xml").
+		Send(xml).
+		End()
+
+	New().Post(ts.URL).
+		Set("Content-Type", "application/xml").
+		Send(xml).
+		End()
+}
+
+func TestPlainText(t *testing.T) {
+	text := `hello world \r\n I am GoRequest`
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// check method is PATCH before going to check other features
+		if r.Method != POST {
+			t.Errorf("Expected method %q; got %q", POST, r.Method)
+		}
+		if r.Header == nil {
+			t.Errorf("Expected non-nil request Header")
+		}
+		if r.Header.Get("Content-Type") != "text/plain" {
+			t.Error("Expected Header Content-Type -> text/plain", "| but got", r.Header.Get("Content-Type"))
+		}
+
+		defer r.Body.Close()
+		body, _ := ioutil.ReadAll(r.Body)
+		if string(body) != text {
+			t.Error(`Expected text `, text, "| but got", string(body))
+		}
+	}))
+
+	defer ts.Close()
+
+	New().Post(ts.URL).
+		Type("text").
+		Send(text).
+		End()
+
+	New().Post(ts.URL).
+		Set("Content-Type", "text/plain").
+		Send(text).
 		End()
 }
